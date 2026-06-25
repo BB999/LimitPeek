@@ -1,5 +1,10 @@
 'use strict';
 
+// mac 以外は vibrancy が無いので body に不透明背景を敷く（CSS の .solid-bg）。
+if (window.api.platform && window.api.platform !== 'darwin') {
+  document.body.classList.add('solid-bg');
+}
+
 // --- 多言語辞書 ---
 const I18N = {
   ja: {

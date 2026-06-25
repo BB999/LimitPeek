@@ -25,11 +25,18 @@
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font: 13px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
+      font: 13px/1.4 -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
       color: var(--fg);
       padding: 12px 14px;
       -webkit-user-select: none;
       user-select: none;
+    }
+    /* mac は vibrancy(すりガラス)が背景なので body は透過のまま。
+       Windows/Linux は vibrancy 非対応のため body に不透明背景を敷く。
+       色はテーマ追従（ダーク=暗灰 / ライト=白）。 */
+    body.solid-bg { background: #232323; }
+    @media (prefers-color-scheme: light) {
+      body.solid-bg { background: #f2f2f2; }
     }
     .svc { margin-bottom: 12px; }
     .svc-head {

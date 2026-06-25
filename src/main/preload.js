@@ -3,6 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform, // 'darwin' | 'win32' | 'linux'（renderer の見た目分岐用）
   getSnapshot: () => ipcRenderer.invoke('get-snapshot'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   refreshNow: () => ipcRenderer.invoke('refresh-now'),

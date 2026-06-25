@@ -2,10 +2,11 @@
 
 // Claude Code のレートリミット使用率を取得するプロバイダ。
 //
-// 認証情報の在り処は環境によって2通りある:
-//   1) ~/.claude/.credentials.json （ファイル）
+// 認証情報の在り処は環境によって複数ある:
+//   1) ~/.claude/.credentials.json （ファイル。全 OS 共通の第一候補）
 //   2) macOS Keychain （サービス名 "Claude Code-credentials"）
-// この環境はファイルが無く Keychain に入っているため、両対応する。
+//   3) Windows 資格情報マネージャ （ターゲット名 "Claude Code-credentials"）
+// まずファイルを見て、無ければ OS ごとの安全な保管庫を見る。
 //
 // エンドポイント: GET https://api.anthropic.com/api/oauth/usage
 //   - Authorization: Bearer <accessToken>
@@ -26,7 +27,8 @@ const BETA_HEADER = 'oauth-2025-04-20';
 const USER_AGENT = 'claude-code/2.1.69 (external; limitpeek)';
 
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
-const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+// macOS Keychain のサービス名 / Windows 資格情報マネージャのターゲット名（共通）
+const CREDENTIAL_TARGET = 'Claude Code-credentials';
 
 // --- 認証情報の取得 -------------------------------------------------------
 
@@ -40,11 +42,12 @@ function readCredentialsFromFile() {
   }
 }
 
+// macOS Keychain から読む（security コマンド）。
 function readCredentialsFromKeychain() {
   return new Promise((resolve) => {
     execFile(
       'security',
-      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
+      ['find-generic-password', '-s', CREDENTIAL_TARGET, '-w'],
       { timeout: 5000 },
       (err, stdout) => {
         if (err || !stdout) return resolve(null);
@@ -59,8 +62,77 @@ function readCredentialsFromKeychain() {
   });
 }
 
+// Windows 資格情報マネージャから読む。
+// cmdkey ではパスワード本体が取れないため PowerShell + CredentialManager を使う。
+// 標準では CredentialManager モジュールが無いこともあるので、Win32 API を
+// PowerShell から直接叩く（追加インストール不要）。Generic 資格情報を対象にする。
+function readCredentialsFromWinCred() {
+  // ターゲット名は claude code 本体が書く想定。複数候補を順に当たる。
+  const targets = [CREDENTIAL_TARGET, 'Claude Code', 'claude'];
+  // PowerShell スクリプト: CredRead(Win32) で blob を取り、UTF-8 文字列にして出力。
+  const ps = `
+$ErrorActionPreference='Stop'
+$sig=@'
+using System;
+using System.Runtime.InteropServices;
+public class CredMan {
+  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool CredRead(string target, int type, int flags, out IntPtr credential);
+  [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr cred);
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public int Flags; public int Type; public string TargetName; public string Comment;
+    public long LastWritten; public int CredentialBlobSize; public IntPtr CredentialBlob;
+    public int Persist; public int AttributeCount; public IntPtr Attributes;
+    public string TargetAlias; public string UserName;
+  }
+}
+'@
+Add-Type -TypeDefinition $sig -Language CSharp | Out-Null
+$targets = @(${targets.map((t) => `'${t.replace(/'/g, "''")}'`).join(',')})
+foreach ($t in $targets) {
+  $p=[IntPtr]::Zero
+  if ([CredMan]::CredRead($t,1,0,[ref]$p)) {
+    $c=[Runtime.InteropServices.Marshal]::PtrToStructure($p,[type][CredMan+CREDENTIAL])
+    if ($c.CredentialBlobSize -gt 0) {
+      $bytes=New-Object byte[] $c.CredentialBlobSize
+      [Runtime.InteropServices.Marshal]::Copy($c.CredentialBlob,$bytes,0,$c.CredentialBlobSize)
+      [CredMan]::CredFree($p)
+      [Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes))
+      exit 0
+    }
+    [CredMan]::CredFree($p)
+  }
+}
+exit 1
+`.trim();
+
+  return new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 },
+      (err, stdout) => {
+        if (err || !stdout) return resolve(null);
+        try {
+          const json = JSON.parse(stdout.trim());
+          resolve(json.claudeAiOauth || null);
+        } catch {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
 async function getOAuth() {
-  return readCredentialsFromFile() || (await readCredentialsFromKeychain());
+  // 全 OS 共通: まずファイルを見る
+  const fromFile = readCredentialsFromFile();
+  if (fromFile) return fromFile;
+  // OS ごとの安全な保管庫にフォールバック
+  if (process.platform === 'darwin') return await readCredentialsFromKeychain();
+  if (process.platform === 'win32') return await readCredentialsFromWinCred();
+  return null;
 }
 
 // --- レスポンス正規化 -----------------------------------------------------

@@ -22,6 +22,9 @@ let usage = null;
 let settings = null;
 let lastSnap = null;
 
+const IS_MAC = process.platform === 'darwin';
+const IS_WIN = process.platform === 'win32';
+
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 const SVGS = {
   claude: fs.readFileSync(path.join(ASSETS, 'claude.svg'), 'utf8'),
@@ -29,8 +32,9 @@ const SVGS = {
 };
 const APP_ICON_PATH = path.join(ASSETS, 'icon.png');
 
-// アプリアイコンを設定してから Dock を隠す（メニューバー常駐アプリ）
-if (process.platform === 'darwin' && app.dock) {
+// アプリアイコンを設定してから Dock を隠す（mac のメニューバー常駐アプリ）。
+// Windows にも Dock はあり Dock API は呼ぶだけ無害だが、明示的に mac ガードする。
+if (IS_MAC && app.dock) {
   try { app.dock.setIcon(APP_ICON_PATH); } catch { /* noop */ }
   app.dock.hide();
 }
@@ -95,22 +99,37 @@ function requestTrayRender(snap) {
   if (!trayRenderer || !trayRendererReady) return;
   const items = trayItems(snap);
   if (!items.length) {
-    // 監視対象なし or 全滅: 文字だけのフォールバック
+    // 監視対象なし or 全滅時のフォールバック。
+    // mac: setTitle でメニューバーに文字を出せる（空画像でOK）。
+    // Windows: トレイは画像必須で setTitle が効かないため、アプリアイコンを出して
+    //          ツールチップに状態を載せる（アイコンが消えて見失うのを防ぐ）。
     if (tray) {
-      tray.setImage(nativeImage.createEmpty());
-      tray.setTitle(' Limit');
+      if (IS_MAC) {
+        tray.setImage(nativeImage.createEmpty());
+        tray.setTitle(' Limit');
+      } else {
+        try { tray.setImage(nativeImage.createFromPath(APP_ICON_PATH).resize({ width: 16, height: 16 })); } catch { /* noop */ }
+        tray.setToolTip('LimitPeek — 取得待ち / 監視オフ');
+      }
     }
     return;
   }
   const scale = screen.getPrimaryDisplay().scaleFactor || 2;
-  trayRenderer.webContents.send('render-tray', { items, scale, svgs: SVGS });
+  // mac: テンプレート画像にするので描画色は黒固定（OS が明暗反転してくれる）。
+  // Windows: テンプレート非対応。トレイ背景はタスクバーのテーマに依存するため、
+  //          ダークテーマなら白、ライトテーマなら黒で描いて視認性を確保する。
+  const template = IS_MAC;
+  const fg = template
+    ? '#000000'
+    : (nativeTheme.shouldUseDarkColors ? '#ffffff' : '#000000');
+  trayRenderer.webContents.send('render-tray', { items, scale, svgs: SVGS, fg, template });
 }
 
 // --- ポップアップウィンドウ ----------------------------------------------
 const POPUP_WIDTH = 300;
 
 function createPopup() {
-  popup = new BrowserWindow({
+  const opts = {
     width: POPUP_WIDTH,
     height: 240,
     show: false,
@@ -120,14 +139,22 @@ function createPopup() {
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    transparent: true,
-    vibrancy: 'menu',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
-  });
+  };
+  // mac はすりガラス(vibrancy)。透過 + vibrancy はセットで効く。
+  // Windows/Linux は vibrancy 非対応。背景は renderer 側 CSS(.solid-bg)が
+  //   テーマ追従で塗るので、ちらつき防止に初期背景色だけ与えておく。
+  if (IS_MAC) {
+    opts.transparent = true;
+    opts.vibrancy = 'menu';
+  } else {
+    opts.backgroundColor = nativeTheme.shouldUseDarkColors ? '#232323' : '#f2f2f2';
+  }
+  popup = new BrowserWindow(opts);
   popup.loadFile(path.join(__dirname, '..', 'renderer', 'popup.html'));
   popup.on('blur', () => { if (popup) popup.hide(); });
 }
@@ -214,9 +241,11 @@ ipcMain.on('tray-ready', () => {
 ipcMain.on('tray-image', (_e, { dataUrl, width, height }) => {
   if (!tray) return;
   const img = nativeImage.createFromDataURL(dataUrl);
-  // 論理サイズを指定して Retina をきれいに縮小。テンプレート化で明暗に追従。
+  // 論理サイズを指定して高 DPI をきれいに縮小。
   const resized = img.resize({ width, height });
-  resized.setTemplateImage(true);
+  // mac はテンプレート化でメニューバーの明暗に自動追従。
+  // Windows はテンプレート非対応なので、描画側でテーマに応じた色を焼き込み済み。
+  if (IS_MAC) resized.setTemplateImage(true);
   tray.setImage(resized);
   tray.setTitle(''); // 画像のみ
 
@@ -238,9 +267,17 @@ app.whenReady().then(() => {
     sendSnapshot();
   });
 
-  tray = new Tray(nativeImage.createEmpty());
-  tray.setTitle(' Limit');
+  // 初期アイコン。mac は空画像 + setTitle で文字が出るが、Windows は画像必須
+  // （空だとトレイから見えない）。Windows はアプリアイコンを初期表示する。
+  let initialImg = nativeImage.createEmpty();
+  if (!IS_MAC) {
+    try { initialImg = nativeImage.createFromPath(APP_ICON_PATH).resize({ width: 16, height: 16 }); } catch { /* noop */ }
+  }
+  tray = new Tray(initialImg);
+  if (IS_MAC) tray.setTitle(' Limit');
   tray.setToolTip('LimitPeek — Claude / Codex レートリミット');
+  // クリックでポップアップ開閉。Windows は左クリック=表示、右クリック=メニューが慣習だが、
+  // このアプリは右クリックでもポップアップを開く（メニュー項目はポップアップ内にある）。
   tray.on('click', () => togglePopup());
   tray.on('right-click', () => togglePopup());
 

@@ -21,14 +21,29 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// codex CLI が置かれがちな場所（Homebrew / npm global / nvm 等）。
-const COMMON_BIN_DIRS = [
-  '/opt/homebrew/bin',
-  '/usr/local/bin',
-  path.join(os.homedir(), '.local', 'bin'),
-  path.join(os.homedir(), '.npm-global', 'bin'),
-  path.join(os.homedir(), '.volta', 'bin'),
-];
+const IS_WIN = process.platform === 'win32';
+
+// codex CLI が置かれがちな場所。OS ごとに変える。
+// mac/Linux: Homebrew / npm global / nvm / volta 等。
+// Windows: npm global(%APPDATA%\npm) / scoop / %LOCALAPPDATA% 等。
+const COMMON_BIN_DIRS = IS_WIN
+  ? [
+      path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'npm'),
+      path.join(os.homedir(), 'scoop', 'shims'),
+      path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Microsoft', 'WinGet', 'Links'),
+      path.join(os.homedir(), '.cargo', 'bin'),
+      'C:\\Program Files\\nodejs',
+    ]
+  : [
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      path.join(os.homedir(), '.local', 'bin'),
+      path.join(os.homedir(), '.npm-global', 'bin'),
+      path.join(os.homedir(), '.volta', 'bin'),
+    ];
+
+// Windows は実行ファイルの拡張子が複数ある（npm 配布は .cmd、ネイティブは .exe）。
+const CODEX_NAMES = IS_WIN ? ['codex.cmd', 'codex.exe', 'codex.bat', 'codex'] : ['codex'];
 
 function existsFile(p) {
   try { return fs.statSync(p).isFile(); } catch { return false; }
@@ -37,20 +52,23 @@ function existsFile(p) {
 function resolveCodexBin() {
   if (process.env.CODEX_BIN && existsFile(process.env.CODEX_BIN)) return process.env.CODEX_BIN;
   for (const dir of COMMON_BIN_DIRS) {
-    const cand = path.join(dir, 'codex');
-    if (existsFile(cand)) return cand;
+    for (const name of CODEX_NAMES) {
+      const cand = path.join(dir, name);
+      if (existsFile(cand)) return cand;
+    }
   }
   // 最後の手段: PATH 任せ（spawn が PATH から探す）
   return 'codex';
 }
 
-// .app を Finder から開くと PATH が最小限になり、codex（#!/usr/bin/env node の
-// スクリプト）が node を見つけられず起動に失敗する。
-// そこで子プロセスには共通 bin ディレクトリを足した PATH を明示的に渡す。
+// .app を Finder から開く / Windows でスタートメニューから開くと PATH が最小限になり、
+// codex（mac は #!/usr/bin/env node、Windows は .cmd ラッパ）が node を見つけられず
+// 起動に失敗することがある。子プロセスには共通 bin を足した PATH を明示的に渡す。
+// 区切り文字は OS 依存（mac/Linux ':' / Windows ';'）なので path.delimiter を使う。
 function buildChildEnv() {
-  const extra = COMMON_BIN_DIRS.join(':');
+  const extra = COMMON_BIN_DIRS.join(path.delimiter);
   const base = process.env.PATH || '';
-  return { ...process.env, PATH: extra + (base ? ':' + base : '') };
+  return { ...process.env, PATH: extra + (base ? path.delimiter + base : '') };
 }
 
 function toResetMs(value) {
@@ -79,9 +97,14 @@ function fetchCodexUsage({ timeoutMs = 12000 } = {}) {
     const bin = resolveCodexBin();
     let child;
     try {
+      // Windows の .cmd/.bat ラッパは直接 spawn できない（要 shell 経由）。
+      // .exe や mac/Linux の実行ファイルは shell 不要。
+      const needsShell = IS_WIN && /\.(cmd|bat)$/i.test(bin);
       child = spawn(bin, ['app-server'], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: buildChildEnv(),
+        windowsHide: true,
+        shell: needsShell,
       });
     } catch (e) {
       return resolve({ ok: false, reason: 'spawn_error', detail: String(e && e.message) });

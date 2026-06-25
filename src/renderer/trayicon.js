@@ -15,6 +15,7 @@ const PAD_X = 2;        // 左右余白
 
 let claudeImg = null;
 let codexImg = null;
+let logoColor = null; // ロゴ画像を焼いた色。色が変われば再ロードする。
 
 function loadImage(src) {
   return new Promise((resolve) => {
@@ -25,26 +26,36 @@ function loadImage(src) {
   });
 }
 
-// SVG を単色(黒)で塗ったテンプレートにするため、data URL を fill 指定付きで作る。
-function svgDataUrl(rawSvg) {
-  // fill を currentColor 化 → 黒で塗る（テンプレート化は main 側で行う）
-  const black = rawSvg.replace('<svg ', '<svg fill="#000000" ');
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(black);
+// SVG を単色で塗った data URL を作る。
+//   mac : 黒で塗り、main 側でテンプレート化して明暗追従。
+//   Win : テーマに応じた色(白/黒)を直接焼き込む。
+function svgDataUrl(rawSvg, color) {
+  const painted = rawSvg.replace('<svg ', `<svg fill="${color}" `);
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(painted);
 }
 
-async function ensureLogos(svgs) {
-  if (!claudeImg) claudeImg = await loadImage(svgDataUrl(svgs.claude));
-  if (!codexImg) codexImg = await loadImage(svgDataUrl(svgs.codex));
+async function ensureLogos(svgs, color) {
+  // 前景色が変わったら（Windows のテーマ切替など）ロゴを塗り直す。
+  if (logoColor !== color) {
+    claudeImg = null;
+    codexImg = null;
+    logoColor = color;
+  }
+  if (!claudeImg) claudeImg = await loadImage(svgDataUrl(svgs.claude, color));
+  if (!codexImg) codexImg = await loadImage(svgDataUrl(svgs.codex, color));
 }
 
-async function render({ items, scale, svgs }) {
-  await ensureLogos(svgs);
+async function render({ items, scale, svgs, fg, template }) {
+  // fg 未指定（旧 main 互換）なら黒。
+  const color = fg || '#000000';
+  await ensureLogos(svgs, color);
 
   const ratio = scale || 2; // Retina
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
 
-  ctx.font = `600 ${FONT_PX}px -apple-system, system-ui, sans-serif`;
+  const FONT = `600 ${FONT_PX}px -apple-system, system-ui, "Segoe UI", sans-serif`;
+  ctx.font = FONT;
 
   // まず合計幅を測る
   let width = PAD_X;
@@ -66,8 +77,8 @@ async function render({ items, scale, svgs }) {
   ctx.scale(ratio, ratio);
   ctx.clearRect(0, 0, width, H);
 
-  ctx.font = `600 ${FONT_PX}px -apple-system, system-ui, sans-serif`;
-  ctx.fillStyle = '#000000';
+  ctx.font = FONT;
+  ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
   const midY = H / 2;
 

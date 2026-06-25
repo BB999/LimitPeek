@@ -10,7 +10,9 @@
     "probe:claude": "node scripts/probe-claude.js",
     "probe:codex": "node scripts/probe-codex.js",
     "make-icon": "electron scripts/make-icon.js",
-    "dist": "electron-builder --mac"
+    "make-win-icon": "node scripts/make-win-icon.js",
+    "dist": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
   },
   "build": {
     "appId": "com.noranekobi.limitpeek",
@@ -24,6 +26,21 @@
       "extendInfo": {
         "LSUIElement": true
       }
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LimitPeek"
     },
     "files": [
       "src/**/*",
