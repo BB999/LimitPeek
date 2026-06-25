@@ -13,6 +13,7 @@ const DEFAULTS = {
   launchAtLogin: false,
   lang: 'ja', // 表示言語 'ja' | 'en'
   trayWindow: '5h', // メニューバーに出す窓 '5h' | '7d' | 'both'
+  pulseOnSession: true, // セッション稼働中にロゴをパルスさせる
 };
 
 function filePath() {
@@ -36,6 +37,8 @@ function save(settings) {
   merged.lang = merged.lang === 'en' ? 'en' : 'ja';
   // メニューバー表示窓は 5h / 7d / both のみ許容
   merged.trayWindow = ['7d', 'both'].includes(merged.trayWindow) ? merged.trayWindow : '5h';
+  // パルス設定は真偽値に正規化
+  merged.pulseOnSession = !!merged.pulseOnSession;
   try {
     fs.writeFileSync(filePath(), JSON.stringify(merged, null, 2), 'utf8');
   } catch {

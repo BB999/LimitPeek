@@ -13,6 +13,8 @@ const I18N = {
     watchClaude: 'Claude Code を監視',
     watchCodex: 'Codex を監視',
     launchAtLogin: 'ログイン時に自動起動',
+    pulseOnSession: '稼働中アニメーション',
+    pulseOnSessionHint: 'セッション中ロゴがもこもこ動く',
     trayWindow: 'メニューバー表示',
     both: '両方',
     language: '言語',
@@ -45,6 +47,8 @@ const I18N = {
     watchClaude: 'Watch Claude Code',
     watchCodex: 'Watch Codex',
     launchAtLogin: 'Launch at login',
+    pulseOnSession: 'Pulse while active',
+    pulseOnSessionHint: 'Logo pulses during a session',
     trayWindow: 'Menu bar shows',
     both: 'Both',
     language: 'Language',
@@ -188,6 +192,7 @@ const $interval = document.getElementById('interval');
 const $watchClaude = document.getElementById('watchClaude');
 const $watchCodex = document.getElementById('watchCodex');
 const $login = document.getElementById('launchAtLogin');
+const $pulse = document.getElementById('pulseOnSession');
 const $setSaved = document.getElementById('setSaved');
 
 let saveTimer = null;
@@ -197,6 +202,7 @@ function fillSettings(s) {
   $watchClaude.checked = s.watchClaude;
   $watchCodex.checked = s.watchCodex;
   $login.checked = s.launchAtLogin;
+  $pulse.checked = s.pulseOnSession;
   if (s.lang && s.lang !== lang) {
     lang = s.lang;
     applyLang();
@@ -218,6 +224,7 @@ async function saveSettings() {
     watchClaude: $watchClaude.checked,
     watchCodex: $watchCodex.checked,
     launchAtLogin: $login.checked,
+    pulseOnSession: $pulse.checked,
     lang,
     trayWindow: trayWin,
   });
@@ -227,7 +234,7 @@ async function saveSettings() {
   saveTimer = setTimeout(() => $setSaved.classList.remove('show'), 1200);
 }
 
-[$interval, $watchClaude, $watchCodex, $login].forEach((el) => {
+[$interval, $watchClaude, $watchCodex, $login, $pulse].forEach((el) => {
   el.addEventListener('change', saveSettings);
 });
 

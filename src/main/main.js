@@ -13,6 +13,7 @@ const {
 } = require('electron');
 const store = require('./store');
 const { UsageStore } = require('./usageStore');
+const { SessionDetector } = require('./sessionDetect');
 
 let tray = null;
 let popup = null;
@@ -21,6 +22,50 @@ let trayRendererReady = false;
 let usage = null;
 let settings = null;
 let lastSnap = null;
+
+// --- セッション稼働アニメーション（パルス）--------------------------------
+let sessionDetector = null;
+let sessions = { claude: false, codex: false }; // 各 CLI が稼働中か
+let pulseTimer = null;                            // アニメフレーム送出タイマー
+let pulsePhase = 0;                               // 0..1 を周期的に進める位相
+const PULSE_FPS = 12;                             // フレームレート（CPU 負荷を抑える）
+const PULSE_PERIOD_MS = 1400;                     // 1 周期の長さ（ふわっと拡縮）
+
+// パルスのアニメが必要か（設定 ON かつ いずれかのセッション稼働中）
+function pulseActive() {
+  if (!settings || !settings.pulseOnSession) return false;
+  return sessions.claude || sessions.codex;
+}
+
+// 各ロゴの拡大率(scale)を位相から算出。稼働中のロゴだけ 1.0→1.18 を行き来する。
+function pulseScales() {
+  // sin 波で 0..1。ease がかかって自然に見える。
+  const wave = (1 - Math.cos(pulsePhase * Math.PI * 2)) / 2; // 0..1
+  const amp = 0.45; // 最大拡大率（+45%）。ロゴ基準サイズ(SIZE=14)を小さめにして
+                    // トレイ高(H=22)に収まる範囲で拡縮の幅を大きく見せる。
+  const s = 1 + wave * amp;
+  return {
+    claude: pulseActive() && sessions.claude ? s : 1,
+    codex: pulseActive() && sessions.codex ? s : 1,
+  };
+}
+
+function startPulseLoop() {
+  if (pulseTimer) return;
+  pulseTimer = setInterval(() => {
+    if (!pulseActive()) { stopPulseLoop(); return; }
+    pulsePhase = (pulsePhase + (1000 / PULSE_FPS) / PULSE_PERIOD_MS) % 1;
+    if (lastSnap) requestTrayRender(lastSnap);
+  }, Math.round(1000 / PULSE_FPS));
+}
+
+function stopPulseLoop() {
+  if (pulseTimer) clearInterval(pulseTimer);
+  pulseTimer = null;
+  pulsePhase = 0;
+  // パルス停止後、等倍の状態で 1 枚描き直して残像を消す。
+  if (lastSnap) requestTrayRender(lastSnap);
+}
 
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 const SVGS = {
@@ -103,7 +148,9 @@ function requestTrayRender(snap) {
     return;
   }
   const scale = screen.getPrimaryDisplay().scaleFactor || 2;
-  trayRenderer.webContents.send('render-tray', { items, scale, svgs: SVGS });
+  // 稼働中ロゴの拡大率を載せる。レンダラ側はロゴ描画時にこれを使う。
+  const pulse = pulseScales();
+  trayRenderer.webContents.send('render-tray', { items, scale, svgs: SVGS, pulse });
 }
 
 // --- ポップアップウィンドウ ----------------------------------------------
@@ -195,6 +242,9 @@ ipcMain.handle('save-settings', (_e, next) => {
   usage.setSettings(settings);
   applyLaunchAtLogin(settings.launchAtLogin);
   sendSnapshot();
+  // パルス設定の変更を即反映（OFF→停止 / ON かつ稼働中→開始）
+  if (pulseActive()) startPulseLoop();
+  else stopPulseLoop();
   // trayWindow 等の変更を即メニューバーへ反映
   const snap = lastSnap || (usage && usage.snapshot());
   if (snap) requestTrayRender(snap);
@@ -247,6 +297,15 @@ app.whenReady().then(() => {
   createTrayRenderer();
   createPopup();
   usage.start();
+
+  // セッション稼働の監視 → 状態が変わったらパルスの開始/停止を切り替える。
+  sessionDetector = new SessionDetector();
+  sessionDetector.on('change', (next) => {
+    sessions = next;
+    if (pulseActive()) startPulseLoop();
+    else stopPulseLoop();
+  });
+  sessionDetector.start();
 
   // ダーク/ライト切替時は再描画（テンプレート画像なので色は自動だが、念のため）
   nativeTheme.on('updated', () => { if (lastSnap) requestTrayRender(lastSnap); });

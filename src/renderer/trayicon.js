@@ -7,7 +7,7 @@
 // main から render-tray イベントで { items, scale } を受け取り、
 // 描画結果(dataURL)を tray-image で返す。
 
-const SIZE = 18;        // ロゴの論理サイズ(px)
+const SIZE = 14;        // ロゴの論理サイズ(px)
 const FONT_PX = 13;     // 文字サイズ
 const GAP_LOGO_TXT = 3; // ロゴ↔文字
 const GAP_GROUP = 10;   // グループ間
@@ -37,8 +37,9 @@ async function ensureLogos(svgs) {
   if (!codexImg) codexImg = await loadImage(svgDataUrl(svgs.codex));
 }
 
-async function render({ items, scale, svgs }) {
+async function render({ items, scale, svgs, pulse }) {
   await ensureLogos(svgs);
+  const pulseScale = pulse || { claude: 1, codex: 1 };
 
   const ratio = scale || 2; // Retina
   const canvas = document.getElementById('c');
@@ -77,7 +78,17 @@ async function render({ items, scale, svgs }) {
       const img = it.logo === 'claude' ? claudeImg : codexImg;
       if (img) {
         const y = (H - SIZE) / 2;
-        ctx.drawImage(img, cx, y, SIZE, SIZE);
+        // パルス: ロゴ枠(SIZE×SIZE)の中心を基準に拡縮する。
+        // レイアウト幅は等倍のままなので、文字位置はパルスでガタつかない。
+        const s = pulseScale[it.logo] || 1;
+        if (s === 1) {
+          ctx.drawImage(img, cx, y, SIZE, SIZE);
+        } else {
+          const drawn = SIZE * s;
+          const dx = cx + (SIZE - drawn) / 2;
+          const dy = y + (SIZE - drawn) / 2;
+          ctx.drawImage(img, dx, dy, drawn, drawn);
+        }
       }
       cx += SIZE + GAP_LOGO_TXT;
     }
