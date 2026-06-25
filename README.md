@@ -4,19 +4,39 @@
 
 メニューバーには各サービスの公式ロゴ＋使用率がコンパクトに出る（例: `✳ 20%  ❀ 22%` ＝ Claude 20% / Codex 22%）。ロゴはテンプレート画像なのでメニューバーの明暗（ライト/ダーク）に自動追従する。表示する窓は **5h / 7d / 両方併記**（例: `✳ 20% / 5%`）から選べる。クリックすると 5h・7d のバーとリセット時刻が見られる。UI は日本語 / 英語を切り替え可能。
 
+## ダウンロードして使う（推奨）
+
+ビルド済みアプリは [Releases](https://github.com/BB999/LimitPeek/releases/latest) から入手できる（Apple Silicon / arm64 向け）。
+
+1. 最新リリースの **`LimitPeek-x.y.z-mac-arm64.zip`** をダウンロードして解凍する
+2. `LimitPeek.app` を `アプリケーション`（`/Applications`）フォルダに移動する
+3. **初回だけ**ひと手間いる（このアプリは未署名のため）:
+   - `LimitPeek.app` を **右クリック →「開く」**、出てくる確認ダイアログでもう一度 **「開く」**
+   - これでこの先はダブルクリックで普通に起動できる
+
+> **「"LimitPeek" は壊れているため開けません」と出る場合**
+> ブラウザのダウンロードで付く検疫属性（quarantine）が原因。ターミナルで次を実行してから上の手順をやり直す:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/LimitPeek.app
+> ```
+
+起動するとメニューバーに使用率が出る（Dock には出ない）。あとは下の [使い方](#使い方) と同じ。
+
 ## 必要なもの
 
-- macOS 12+（メニューバー常駐）
-- Node.js（`npm` が使えること）
+- macOS 12+ / Apple Silicon（メニューバー常駐）
 - Claude Code にログイン済み（認証情報は `~/.claude/.credentials.json` か macOS Keychain のどちらでも可）
 - `codex` CLI がインストール済み（既定パス `/opt/homebrew/bin/codex`。違う場合は環境変数 `CODEX_BIN` で指定）
+- ※ ソースから動かす場合のみ Node.js（`npm`）も必要
 
-## 使い方
+## ソースから動かす（開発者向け）
 
 ```bash
 npm install      # 初回のみ
 npm start        # 起動（メニューバーに常駐。Dock には出ない）
 ```
+
+## 使い方
 
 メニューバーのアイコンをクリック → ポップアップ。使用率のバーと設定パネルが 1 つの画面に常時並ぶ（別ウィンドウは開かない）。
 
@@ -83,4 +103,13 @@ scripts/
 
 - 認証トークンは表示・ログ出力しない。Keychain/ファイルから読んで API 呼び出しに使うだけ
 - Claude のトークン期限切れ時は「要再ログイン」と表示（自動リフレッシュは未対応）
-- 配布用ビルドは `npm run dist`（未署名。手元利用向け）
+- 配布用ビルド（未署名。手元利用向け）の手順:
+
+  ```bash
+  npm run dist                                          # dist/mac-arm64/LimitPeek.app を生成
+  codesign --force --deep --sign - dist/mac-arm64/LimitPeek.app   # ★ad-hoc 署名（無いと「壊れている」になる）
+  codesign --verify --deep --strict dist/mac-arm64/LimitPeek.app  # エラーが出ないことを確認
+  ditto -c -k --keepParent dist/mac-arm64/LimitPeek.app dist/mac-arm64/LimitPeek-0.1.0-mac-arm64.zip
+  ```
+
+  `identity: null` だと electron-builder は署名をスキップし、バンドルと整合しない署名が残って Apple Silicon で「壊れている」と判定される。ビルド後に必ず `codesign` し直すこと。
