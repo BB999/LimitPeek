@@ -1,0 +1,36 @@
+{
+  "name": "limitpeek",
+  "version": "0.1.0",
+  "description": "Claude Code と Codex のレートリミット使用率を macOS メニューバーに表示する Electron アプリ",
+  "main": "src/main/main.js",
+  "author": "noranekobi",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "probe:claude": "node scripts/probe-claude.js",
+    "probe:codex": "node scripts/probe-codex.js",
+    "make-icon": "electron scripts/make-icon.js",
+    "dist": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.noranekobi.limitpeek",
+    "productName": "LimitPeek",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "target": "dir",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3"
+  }
+}
