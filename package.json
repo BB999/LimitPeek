@@ -19,7 +19,8 @@
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
       "identity": null,
-      "target": "dir",
+      "gatekeeperAssess": false,
+      "target": "zip",
       "extendInfo": {
         "LSUIElement": true
       }
