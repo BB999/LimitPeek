@@ -8,7 +8,7 @@
 
 ビルド済みアプリは [Releases](https://github.com/BB999/LimitPeek/releases/latest) から入手できる（Apple Silicon / arm64 向け）。
 
-1. 最新リリースの **`LimitPeek-x.y.z-mac-arm64.zip`** をダウンロードして解凍する
+1. 最新リリースの **`LimitPeek-x.y.z-arm64-mac.zip`** をダウンロードして解凍する
 2. `LimitPeek.app` を `アプリケーション`（`/Applications`）フォルダに移動する
 3. **初回だけ**ひと手間いる（このアプリは未署名のため）:
    - `LimitPeek.app` を **右クリック →「開く」**、出てくる確認ダイアログでもう一度 **「開く」**
