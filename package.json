@@ -1,6 +1,6 @@
 {
   "name": "limitpeek",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Claude Code と Codex のレートリミット使用率を macOS メニューバーに表示する Electron アプリ",
   "main": "src/main/main.js",
   "author": "noranekobi",

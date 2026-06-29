@@ -94,20 +94,30 @@ if (!app.requestSingleInstanceLock()) {
 function trayItems(snap) {
   const items = [];
   const mode = (settings && settings.trayWindow) || '5h';
-  const pctOf = (win) => (win ? `${Math.round(win.usedPercent)}%` : '—');
+  const content = (settings && settings.trayContent) || 'both'; // 'both'|'bar'|'pct'
+  const showBar = content !== 'pct'; // 数字のみ以外はバーを出す
+  const showPct = content !== 'bar'; // バーのみ以外は数字を出す
+  // 1窓 -> セグメント { pct, text }。pct はバー用(0..100)。バー非表示・窓無しは pct=null。
+  const segOf = (win) => {
+    const has = win && typeof win.usedPercent === 'number';
+    // データ無しはバーが描けないので、せめて数字位置に「…」を残す。
+    const text = !has ? '…' : showPct ? `${Math.round(win.usedPercent)}%` : '';
+    return { pct: showBar && has ? win.usedPercent : null, text };
+  };
+  // svc -> { segs:[{pct,text}, ...] }。各セグメントが [バー][数字] のペアになる。
   const pick = (svc) => {
     if (!svc.enabled) return null;
-    if (svc.error && !svc.data) return '…';
+    if (svc.error && !svc.data) return { segs: [{ pct: null, text: '…' }] };
     const d = svc.data;
-    if (!d) return '…';
-    if (mode === 'both') return `${pctOf(d.fiveHour)} / ${pctOf(d.sevenDay)}`;
+    if (!d) return { segs: [{ pct: null, text: '…' }] };
+    if (mode === 'both') return { segs: [segOf(d.fiveHour), segOf(d.sevenDay)] };
     const win = mode === '7d' ? d.sevenDay : d.fiveHour;
-    return win ? `${Math.round(win.usedPercent)}%` : '…';
+    return { segs: [segOf(win)] };
   };
   const c = pick(snap.claude);
   const x = pick(snap.codex);
-  if (c != null) items.push({ logo: 'claude', text: c });
-  if (x != null) items.push({ logo: 'codex', text: x });
+  if (c != null) items.push({ logo: 'claude', segs: c.segs });
+  if (x != null) items.push({ logo: 'codex', segs: x.segs });
   return items;
 }
 
@@ -150,7 +160,9 @@ function requestTrayRender(snap) {
   const scale = screen.getPrimaryDisplay().scaleFactor || 2;
   // 稼働中ロゴの拡大率を載せる。レンダラ側はロゴ描画時にこれを使う。
   const pulse = pulseScales();
-  trayRenderer.webContents.send('render-tray', { items, scale, svgs: SVGS, pulse });
+  // テンプレート化しないので、ロゴ・文字色をテーマに合わせて手動で渡す。
+  const fg = nativeTheme.shouldUseDarkColors ? '#ffffff' : '#000000';
+  trayRenderer.webContents.send('render-tray', { items, scale, svgs: SVGS, pulse, fg });
 }
 
 // --- ポップアップウィンドウ ----------------------------------------------
@@ -260,13 +272,14 @@ ipcMain.on('tray-ready', () => {
   if (snap) requestTrayRender(snap);
 });
 
-// 合成済み画像を受け取って Tray にセット（テンプレート画像で明暗追従）
+// 合成済み画像を受け取って Tray にセット。
+// バーを色付き(閾値で黄/赤)にするためテンプレート化はしない。代わりにロゴ・文字は
+// renderer 側でテーマ前景色(ダーク=白/ライト=黒)で描いて明暗へ手動追従させる。
 ipcMain.on('tray-image', (_e, { dataUrl, width, height }) => {
   if (!tray) return;
   const img = nativeImage.createFromDataURL(dataUrl);
-  // 論理サイズを指定して Retina をきれいに縮小。テンプレート化で明暗に追従。
+  // 論理サイズを指定して Retina をきれいに縮小。
   const resized = img.resize({ width, height });
-  resized.setTemplateImage(true);
   tray.setImage(resized);
   tray.setTitle(''); // 画像のみ
 

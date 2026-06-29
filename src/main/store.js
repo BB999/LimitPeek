@@ -13,6 +13,7 @@ const DEFAULTS = {
   launchAtLogin: false,
   lang: 'ja', // 表示言語 'ja' | 'en'
   trayWindow: '5h', // メニューバーに出す窓 '5h' | '7d' | 'both'
+  trayContent: 'both', // メニューバーの表示内容 'both'(バー+数字) | 'bar' | 'pct'(数字のみ)
   pulseOnSession: true, // セッション稼働中にロゴをパルスさせる
 };
 
@@ -37,7 +38,9 @@ function save(settings) {
   merged.lang = merged.lang === 'en' ? 'en' : 'ja';
   // メニューバー表示窓は 5h / 7d / both のみ許容
   merged.trayWindow = ['7d', 'both'].includes(merged.trayWindow) ? merged.trayWindow : '5h';
-  // パルス設定は真偽値に正規化
+  // 表示内容は bar / pct / both のみ許容（旧 trayBard:false からの移行も吸収）
+  merged.trayContent = ['bar', 'pct'].includes(merged.trayContent) ? merged.trayContent : 'both';
+  // 真偽値に正規化
   merged.pulseOnSession = !!merged.pulseOnSession;
   try {
     fs.writeFileSync(filePath(), JSON.stringify(merged, null, 2), 'utf8');

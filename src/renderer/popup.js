@@ -15,6 +15,10 @@ const I18N = {
     launchAtLogin: 'ログイン時に自動起動',
     pulseOnSession: '稼働中アニメーション',
     pulseOnSessionHint: 'セッション中ロゴがもこもこ動く',
+    trayContent: '表示内容',
+    contentBoth: 'バー+数字',
+    contentBar: 'バー',
+    contentPct: '数字',
     trayWindow: 'メニューバー表示',
     both: '両方',
     language: '言語',
@@ -49,6 +53,10 @@ const I18N = {
     launchAtLogin: 'Launch at login',
     pulseOnSession: 'Pulse while active',
     pulseOnSessionHint: 'Logo pulses during a session',
+    trayContent: 'Show as',
+    contentBoth: 'Bar+%',
+    contentBar: 'Bar',
+    contentPct: '%',
     trayWindow: 'Menu bar shows',
     both: 'Both',
     language: 'Language',
@@ -74,6 +82,7 @@ const I18N = {
 
 let lang = 'ja';
 let trayWin = '5h'; // メニューバー表示窓 '5h' | '7d' | 'both'
+let trayContent = 'both'; // メニューバー表示内容 'both' | 'bar' | 'pct'
 const t = () => I18N[lang] || I18N.ja;
 
 // 最新スナップショットを保持（言語切替時に再描画するため）
@@ -81,7 +90,7 @@ let lastSnap = null;
 
 function barColor(pct) {
   if (pct >= 90) return 'var(--bar-hot)';
-  if (pct >= 70) return 'var(--bar-warn)';
+  if (pct >= 50) return 'var(--bar-warn)';
   return 'var(--bar)';
 }
 
@@ -177,6 +186,13 @@ function applyTrayWin() {
   });
 }
 
+// --- メニューバー表示内容セグメントの選択状態を反映 ---
+function applyContent() {
+  document.querySelectorAll('#contentSeg .seg-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-content') === trayContent);
+  });
+}
+
 // --- 使用率アクション ---
 document.getElementById('refresh').addEventListener('click', async () => {
   const btn = document.getElementById('refresh');
@@ -211,6 +227,10 @@ function fillSettings(s) {
     trayWin = s.trayWindow;
     applyTrayWin();
   }
+  if (s.trayContent && s.trayContent !== trayContent) {
+    trayContent = s.trayContent;
+    applyContent();
+  }
 }
 
 async function saveSettings() {
@@ -227,6 +247,7 @@ async function saveSettings() {
     pulseOnSession: $pulse.checked,
     lang,
     trayWindow: trayWin,
+    trayContent,
   });
   fillSettings(saved);
   $setSaved.classList.add('show');
@@ -246,6 +267,17 @@ document.getElementById('traySeg').addEventListener('click', (e) => {
   if (next === trayWin) return;
   trayWin = next;
   applyTrayWin();
+  saveSettings(); // 永続化＋メニューバー即反映
+});
+
+// --- メニューバー表示内容 切替ボタン ---
+document.getElementById('contentSeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  const next = btn.getAttribute('data-content');
+  if (next === trayContent) return;
+  trayContent = next;
+  applyContent();
   saveSettings(); // 永続化＋メニューバー即反映
 });
 
@@ -269,3 +301,4 @@ window.api.getSettings().then(fillSettings);
 // 初期表示（保存済み設定が来る前のデフォルト適用）
 applyLang();
 applyTrayWin();
+applyContent();

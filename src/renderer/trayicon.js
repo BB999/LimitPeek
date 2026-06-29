@@ -13,8 +13,23 @@ const GAP_LOGO_TXT = 3; // ロゴ↔文字
 const GAP_GROUP = 10;   // グループ間
 const PAD_X = 2;        // 左右余白
 
+// 各セグメント [バー][数字] のペアを描く。バーは数字の左。
+const GAP_BAR_TXT = 3;  // バー↔数字
+const GAP_SEG = 8;      // セグメント間(both のとき [5hバー 5h数字] ↔ [7dバー 7d数字])
+const BAR_W = 14;       // バー長(横)
+const BAR_H = 11;       // バー高(文字並みの太さ)
+const BAR_R = 3;        // バー角丸
+
+// 使用率(0..100)に応じたバー色。ポップアップと同一閾値: 50%黄 / 90%赤。
+function barColor(pct) {
+  if (pct >= 90) return '#ff5c5c';
+  if (pct >= 50) return '#ffb84d';
+  return '#4f9dff';
+}
+
 let claudeImg = null;
 let codexImg = null;
+let logoColor = null; // 現在ロゴを塗っている色（変わったら再ロード）
 
 function loadImage(src) {
   return new Promise((resolve) => {
@@ -25,20 +40,34 @@ function loadImage(src) {
   });
 }
 
-// SVG を単色(黒)で塗ったテンプレートにするため、data URL を fill 指定付きで作る。
-function svgDataUrl(rawSvg) {
-  // fill を currentColor 化 → 黒で塗る（テンプレート化は main 側で行う）
-  const black = rawSvg.replace('<svg ', '<svg fill="#000000" ');
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(black);
+// SVG を単色(color)で塗った data URL を作る。テンプレート化しないので色は自前管理。
+function svgDataUrl(rawSvg, color) {
+  const painted = rawSvg.replace('<svg ', `<svg fill="${color}" `);
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(painted);
 }
 
-async function ensureLogos(svgs) {
-  if (!claudeImg) claudeImg = await loadImage(svgDataUrl(svgs.claude));
-  if (!codexImg) codexImg = await loadImage(svgDataUrl(svgs.codex));
+async function ensureLogos(svgs, color) {
+  if (claudeImg && codexImg && logoColor === color) return;
+  logoColor = color;
+  claudeImg = await loadImage(svgDataUrl(svgs.claude, color));
+  codexImg = await loadImage(svgDataUrl(svgs.codex, color));
 }
 
-async function render({ items, scale, svgs, pulse }) {
-  await ensureLogos(svgs);
+// 角丸の矩形パスを引く（fillStyle は呼び出し側で設定）
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, h / 2, w / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+async function render({ items, scale, svgs, pulse, fg }) {
+  const fgColor = fg || '#000000';
+  await ensureLogos(svgs, fgColor);
   const pulseScale = pulse || { claude: 1, codex: 1 };
 
   const ratio = scale || 2; // Retina
@@ -47,15 +76,31 @@ async function render({ items, scale, svgs, pulse }) {
 
   ctx.font = `600 ${FONT_PX}px -apple-system, system-ui, sans-serif`;
 
+  // 1セグメント = [バー(pct!=null のとき)][数字(text非空のとき)] の幅。
+  // バーのみ/数字のみ/両方 すべてに対応。両方あるときだけ間にギャップを入れる。
+  const segW = (seg) => {
+    const hasBar = seg.pct != null;
+    const txtW = seg.text ? Math.ceil(ctx.measureText(seg.text).width) : 0;
+    const gap = hasBar && txtW ? GAP_BAR_TXT : 0;
+    return (hasBar ? BAR_W : 0) + gap + txtW;
+  };
+  const itemInnerW = (it) => {
+    const segs = it.segs || [];
+    let w = 0;
+    segs.forEach((seg, i) => {
+      w += segW(seg);
+      if (i < segs.length - 1) w += GAP_SEG;
+    });
+    return w;
+  };
+
   // まず合計幅を測る
   let width = PAD_X;
   const layout = [];
   items.forEach((it, i) => {
-    const txt = it.text;
-    const txtW = Math.ceil(ctx.measureText(txt).width);
     const logoW = it.logo ? SIZE : 0;
-    const inner = (logoW ? logoW + GAP_LOGO_TXT : 0) + txtW;
-    layout.push({ ...it, txtW, logoW, x: width });
+    const inner = (logoW ? logoW + GAP_LOGO_TXT : 0) + itemInnerW(it);
+    layout.push({ ...it, logoW, x: width });
     width += inner;
     if (i < items.length - 1) width += GAP_GROUP;
   });
@@ -68,9 +113,9 @@ async function render({ items, scale, svgs, pulse }) {
   ctx.clearRect(0, 0, width, H);
 
   ctx.font = `600 ${FONT_PX}px -apple-system, system-ui, sans-serif`;
-  ctx.fillStyle = '#000000';
   ctx.textBaseline = 'middle';
   const midY = H / 2;
+  const barY = midY - BAR_H / 2;
 
   layout.forEach((it) => {
     let cx = it.x;
@@ -92,7 +137,36 @@ async function render({ items, scale, svgs, pulse }) {
       }
       cx += SIZE + GAP_LOGO_TXT;
     }
-    ctx.fillText(it.text, cx, midY + 0.5);
+
+    // 各セグメント: バー(数字の左) → 数字。バーのみ/数字のみ にも対応。
+    (it.segs || []).forEach((seg, si) => {
+      if (si > 0) cx += GAP_SEG;
+      const hasBar = seg.pct != null;
+      const hasTxt = !!seg.text;
+      if (hasBar) {
+        const pct = seg.pct;
+        const w = Math.max(0, Math.min(100, pct)) / 100 * BAR_W;
+        // トラック（前景色を薄く）
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = fgColor;
+        roundRect(ctx, cx, barY, BAR_W, BAR_H, BAR_R);
+        ctx.fill();
+        // フィル（閾値色）
+        ctx.globalAlpha = 1;
+        if (w > 0) {
+          ctx.fillStyle = barColor(pct);
+          roundRect(ctx, cx, barY, w, BAR_H, BAR_R);
+          ctx.fill();
+        }
+        cx += BAR_W + (hasTxt ? GAP_BAR_TXT : 0);
+      }
+      if (hasTxt) {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = fgColor;
+        ctx.fillText(seg.text, cx, midY + 0.5);
+        cx += Math.ceil(ctx.measureText(seg.text).width);
+      }
+    });
   });
 
   const dataUrl = canvas.toDataURL('image/png');
