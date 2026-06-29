@@ -65,17 +65,20 @@ async function getOAuth() {
 
 // --- レスポンス正規化 -----------------------------------------------------
 // API のレスポンス形は時期・記事により表記揺れがある。観測される代表形:
-//   A) { five_hour: {utilization, resets_at}, seven_day: {...} }      utilization は 0..1
-//   B) { usage: { windows: { "5h": {used_percent}, "7d": {...} } } }  percent は 0..100
+//   A) { five_hour: {utilization, resets_at}, seven_day: {...} }
+//   B) { usage: { windows: { "5h": {used_percent}, "7d": {...} } } }
 //   C) { five_hour: {utilization}, seven_day: {...}, seven_day_oauth_apps: {...} }
-// どれが来ても 0..100 の % に正規化して返す。
+// いずれも utilization / used_percent は 0..100 の「パーセント」で返ってくる。
+// （実 API 確認: utilization=2 は 2% 使用 / utilization=37 は 37% 使用）
+// 0..1 の比率として 100 倍する変換は行わない。それをやると utilization=1（=1% 使用）が
+// 100% に化け、リセット直後に少し使っただけで「満タン」に見えるバグになる。
 
 function toPercent(value) {
   if (value == null) return null;
   const n = Number(value);
   if (Number.isNaN(n)) return null;
-  // 0..1 の比率なら % に変換、すでに % っぽければそのまま。
-  return n <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
+  // 既に 0..100 のパーセント。小数第1位までに丸めるだけ。
+  return Math.round(n * 10) / 10;
 }
 
 function toResetMs(value) {
