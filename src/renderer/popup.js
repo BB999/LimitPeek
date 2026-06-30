@@ -4,8 +4,8 @@
 const I18N = {
   ja: {
     // 固定UIテキスト（data-i18n）
-    refresh: '今すぐ更新',
-    refreshing: '更新中…',
+    refresh: '使用率を更新',
+    refreshing: '取得中…',
     quit: '終了',
     interval: '更新間隔',
     intervalHint: '1〜30 分',
@@ -23,7 +23,7 @@ const I18N = {
     both: '両方',
     language: '言語',
     saved: '保存しました',
-    checkUpdate: '更新をチェック',
+    checkUpdate: 'アプリをアップデート',
     // 動的テキスト
     watchOff: '監視オフ',
     updatedPrefix: '更新',
@@ -31,18 +31,18 @@ const I18N = {
     locale: 'ja-JP',
     update: {
       checking: '確認中…',
-      available: 'v{latest} に更新',
+      available: 'v{latest} にアップデート',
       availableNote: '新しいバージョン v{latest} があります（現在 v{current}）',
       uptodate: '最新です',
       uptodateNote: '最新版です（v{current}）',
-      downloading: '更新中…',
+      downloading: 'アップデート中…',
       stageDownload: 'ダウンロード中…',
       stageVerify: '検証中…',
       stageSwap: '置き換え中…',
       stageRelaunch: '再起動中…',
-      error: '更新に失敗',
-      errorNote: '更新の確認に失敗しました',
-      devNote: '開発実行では自動更新できません',
+      error: 'アップデートに失敗',
+      errorNote: 'アップデートの確認に失敗しました',
+      devNote: '開発実行では自動アップデートできません',
     },
     reason: {
       not_logged_in: '未ログイン',
@@ -58,7 +58,7 @@ const I18N = {
     },
   },
   en: {
-    refresh: 'Refresh now',
+    refresh: 'Refresh usage',
     refreshing: 'Refreshing…',
     quit: 'Quit',
     interval: 'Update interval',
@@ -77,7 +77,7 @@ const I18N = {
     both: 'Both',
     language: 'Language',
     saved: 'Saved',
-    checkUpdate: 'Check for updates',
+    checkUpdate: 'Update app',
     watchOff: 'Off',
     updatedPrefix: 'Updated',
     resetPrefix: 'Resets',
