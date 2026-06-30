@@ -42,3 +42,22 @@ TypeError: Object has been destroyed
   - タイマー停止が例外なく完了（`Object has been destroyed` が出ない）。
   - `relaunchApp()` 後に新プロセスが 0.3.2 で起動。無限ループなし。
 - 修正前は同条件で必ずクラッシュダイアログが出ていた。
+
+## 追記: relaunch 以外でも起きる既存バグだった
+検証後、**実運用版（/Applications の 0.3.2、自動更新も入っていない 6/29 版）**
+が、自動更新と無関係に同じスタックでクラッシュする現象を確認した。
+
+```
+TypeError: Object has been destroyed
+  at requestTrayRender (/Applications/LimitPeek.app/.../main.js:170)
+  at Timeout._onTimeout (.../main.js:63)   ← パルスタイマー
+```
+
+つまりこれは relaunch 特有ではなく、**パルス機能に元から潜んでいた既存バグ**。
+スリープ復帰・GPU プロセス再生成などで `trayRenderer.webContents` が破棄された
+後にパルスタイマー(12fps)が発火すると、ガード無しの `requestTrayRender()` が
+破棄済み `webContents.send()` を呼んで落ちていた。
+
+上記の `requestTrayRender()` 冒頭ガード
+（`trayRenderer.isDestroyed()` / `webContents.isDestroyed()` チェック）は
+この既存クラッシュも同時に塞ぐ。v0.3.3 で配布。

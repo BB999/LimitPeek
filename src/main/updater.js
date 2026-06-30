@@ -16,6 +16,26 @@ const { app } = require('electron');
 const REPO = 'BB999/LimitPeek';
 const UA = 'LimitPeek-Updater';
 
+// 更新の取得元として許可するホスト（GitHub の正規ドメインのみ）。
+// HTTPS 以外・このリスト外への接続／リダイレクトは拒否し、汚染された API
+// レスポンスや細工されたリダイレクトで攻撃者サーバーから取得するのを防ぐ。
+const ALLOWED_HOSTS = new Set([
+  'api.github.com',
+  'github.com',
+  'codeload.github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+]);
+
+// URL が https かつ許可ホスト（または *.githubusercontent.com）かを検証。
+function isAllowedUrl(u) {
+  let parsed;
+  try { parsed = new URL(u); } catch { return false; }
+  if (parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname.toLowerCase();
+  return ALLOWED_HOSTS.has(host) || host.endsWith('.githubusercontent.com');
+}
+
 // "v0.3.2" / "0.3.2" → [0,3,2]。比較できない形は null。
 function parseVer(s) {
   if (!s) return null;
@@ -39,9 +59,12 @@ function cmpVer(a, b) {
 // HTTPS GET（リダイレクト追従）。JSON 文字列を resolve。
 function httpsGetJson(url) {
   return new Promise((resolve, reject) => {
+    if (!isAllowedUrl(url)) return reject(new Error('blocked_host'));
     const req = https.get(url, { headers: { 'User-Agent': UA, Accept: 'application/vnd.github+json' } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
+        // リダイレクト先も許可ホストのみ追従（任意ドメインへの誘導を遮断）
+        if (!isAllowedUrl(res.headers.location)) return reject(new Error('blocked_redirect'));
         return httpsGetJson(res.headers.location).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
@@ -61,9 +84,12 @@ function httpsGetJson(url) {
 // HTTPS GET でファイルへ保存（リダイレクト追従）。
 function downloadTo(url, dest) {
   return new Promise((resolve, reject) => {
+    if (!isAllowedUrl(url)) return reject(new Error('blocked_host'));
     const req = https.get(url, { headers: { 'User-Agent': UA, Accept: 'application/octet-stream' } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
+        // リダイレクト先も許可ホストのみ追従
+        if (!isAllowedUrl(res.headers.location)) return reject(new Error('blocked_redirect'));
         return downloadTo(res.headers.location, dest).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
@@ -131,9 +157,14 @@ async function downloadAndInstall(info, onProgress = () => {}) {
   const bundle = currentAppBundlePath();
   if (!bundle) throw new Error('bundle_not_found');
   if (!info || !info.url) throw new Error('no_asset');
+  // ダウンロード元を GitHub 正規ドメインに限定（汚染 API レスポンス対策）
+  if (!isAllowedUrl(info.url)) throw new Error('blocked_host');
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'limitpeek-upd-'));
-  const zipPath = path.join(work, info.name || 'update.zip');
+  // info.name は API 由来。basename 化して作業ディレクトリ外への書き込み
+  // （パストラバーサル）を防ぐ。
+  const safeName = path.basename(info.name || 'update.zip') || 'update.zip';
+  const zipPath = path.join(work, safeName);
 
   try {
     onProgress('download');
@@ -150,9 +181,13 @@ async function downloadAndInstall(info, onProgress = () => {}) {
     if (!found) throw new Error('app_not_in_zip');
     const newApp = path.join(extractDir, found);
 
-    // ad-hoc 署名し直して整合させる（壊れている扱いを防ぐ）
+    // ad-hoc 署名し直して整合させる（壊れている扱いを防ぐ）。
+    // 注意: ad-hoc 署名は誰でも付けられるため、この codesign --verify は
+    // 「展開した .app の署名が自己整合しているか」のチェックにすぎず、配信物の
+    // 真正性（改ざんされていないか）を保証するものではない。真正性は
+    // 「GitHub の正規ドメインからの HTTPS 取得のみ許可」(isAllowedUrl) と
+    // TLS によって担保する。Developer ID 署名が無いため、これが現実的な上限。
     await run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', newApp]);
-    // 検証（通らなければ差し替えない）
     await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', newApp]);
 
     onProgress('swap');
