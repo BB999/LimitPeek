@@ -23,11 +23,27 @@ const I18N = {
     both: '両方',
     language: '言語',
     saved: '保存しました',
+    checkUpdate: '更新をチェック',
     // 動的テキスト
     watchOff: '監視オフ',
     updatedPrefix: '更新',
     resetPrefix: 'リセット',
     locale: 'ja-JP',
+    update: {
+      checking: '確認中…',
+      available: 'v{latest} に更新',
+      availableNote: '新しいバージョン v{latest} があります（現在 v{current}）',
+      uptodate: '最新です',
+      uptodateNote: '最新版です（v{current}）',
+      downloading: '更新中…',
+      stageDownload: 'ダウンロード中…',
+      stageVerify: '検証中…',
+      stageSwap: '置き換え中…',
+      stageRelaunch: '再起動中…',
+      error: '更新に失敗',
+      errorNote: '更新の確認に失敗しました',
+      devNote: '開発実行では自動更新できません',
+    },
     reason: {
       not_logged_in: '未ログイン',
       auth_expired: '要再ログイン',
@@ -61,10 +77,26 @@ const I18N = {
     both: 'Both',
     language: 'Language',
     saved: 'Saved',
+    checkUpdate: 'Check for updates',
     watchOff: 'Off',
     updatedPrefix: 'Updated',
     resetPrefix: 'Resets',
     locale: 'en-US',
+    update: {
+      checking: 'Checking…',
+      available: 'Update to v{latest}',
+      availableNote: 'A new version v{latest} is available (current v{current})',
+      uptodate: 'Up to date',
+      uptodateNote: 'You are on the latest version (v{current})',
+      downloading: 'Updating…',
+      stageDownload: 'Downloading…',
+      stageVerify: 'Verifying…',
+      stageSwap: 'Replacing…',
+      stageRelaunch: 'Restarting…',
+      error: 'Update failed',
+      errorNote: 'Failed to check for updates',
+      devNote: 'Auto-update is disabled in dev mode',
+    },
     reason: {
       not_logged_in: 'Not logged in',
       auth_expired: 'Re-login required',
@@ -177,6 +209,7 @@ function applyLang() {
     btn.classList.toggle('active', btn.getAttribute('data-lang') === lang);
   });
   render(); // note・リセット時刻・更新時刻を新しい言語で描き直す
+  if (typeof renderUpdate === 'function') renderUpdate(); // 更新ボタンの文言も追従
 }
 
 // --- メニューバー表示窓セグメントの選択状態を反映 ---
@@ -202,6 +235,64 @@ document.getElementById('refresh').addEventListener('click', async () => {
   btn.textContent = t().refresh;
 });
 document.getElementById('quit').addEventListener('click', () => window.api.quit());
+
+// --- アプリ自動更新 ---
+const $appUpdate = document.getElementById('appUpdate');
+const $updateNote = document.getElementById('updateNote');
+let updateState = { status: 'idle' };
+
+// "v{latest}" のような簡易プレースホルダを置換
+function fmt(str, vars) {
+  return String(str).replace(/\{(\w+)\}/g, (_, k) => (vars[k] != null ? vars[k] : ''));
+}
+
+function renderUpdate(s) {
+  if (s) updateState = s;
+  const u = t().update;
+  const st = updateState.status;
+  const v = { latest: updateState.latest, current: updateState.current };
+  // 既定（idle / checking 前）はラベルだけ
+  $appUpdate.classList.remove('has-update');
+  $appUpdate.disabled = false;
+  let note = '';
+
+  if (st === 'checking') {
+    $appUpdate.textContent = u.checking;
+    $appUpdate.disabled = true;
+  } else if (st === 'available') {
+    $appUpdate.textContent = fmt(u.available, v);
+    $appUpdate.classList.add('has-update');
+    note = fmt(u.availableNote, v);
+  } else if (st === 'downloading') {
+    const stageKey = {
+      download: 'stageDownload', verify: 'stageVerify',
+      swap: 'stageSwap', relaunch: 'stageRelaunch',
+    }[updateState.stage] || 'downloading';
+    $appUpdate.textContent = u.downloading;
+    $appUpdate.disabled = true;
+    note = u[stageKey];
+  } else if (st === 'uptodate') {
+    $appUpdate.textContent = t().checkUpdate;
+    note = fmt(u.uptodateNote, v);
+  } else if (st === 'error') {
+    $appUpdate.textContent = t().checkUpdate;
+    note = updateState.error === 'dev_mode' ? u.devNote : u.errorNote;
+  } else {
+    // idle
+    $appUpdate.textContent = t().checkUpdate;
+  }
+  $updateNote.textContent = note;
+  reportHeight();
+}
+
+$appUpdate.addEventListener('click', async () => {
+  // 「更新があります」状態なら適用、それ以外はチェック
+  if (updateState.status === 'available') {
+    renderUpdate(await window.api.applyUpdate());
+  } else {
+    renderUpdate(await window.api.checkUpdate());
+  }
+});
 
 // --- 設定パネル（常時表示） ---
 const $interval = document.getElementById('interval');
@@ -295,10 +386,13 @@ document.getElementById('langSeg').addEventListener('click', (e) => {
 // --- 受信 ---
 window.api.onSnapshot(render);
 window.api.onSettings(fillSettings);
+window.api.onUpdateState(renderUpdate);
 window.api.getSnapshot().then(render);
 window.api.getSettings().then(fillSettings);
+window.api.getUpdateState().then(renderUpdate);
 
 // 初期表示（保存済み設定が来る前のデフォルト適用）
 applyLang();
 applyTrayWin();
 applyContent();
+renderUpdate();

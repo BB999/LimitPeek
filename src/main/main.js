@@ -14,6 +14,7 @@ const {
 const store = require('./store');
 const { UsageStore } = require('./usageStore');
 const { SessionDetector } = require('./sessionDetect');
+const updater = require('./updater');
 
 let tray = null;
 let popup = null;
@@ -22,6 +23,12 @@ let trayRendererReady = false;
 let usage = null;
 let settings = null;
 let lastSnap = null;
+// 終了/再起動シーケンス中は描画・タイマーを止める（破棄済みオブジェクト参照でのクラッシュ防止）
+let isQuitting = false;
+
+// --- 自動更新の状態 --------------------------------------------------------
+// status: 'idle' | 'checking' | 'available' | 'uptodate' | 'downloading' | 'error'
+let updateState = { status: 'idle', current: null, latest: null, stage: null, error: null };
 
 // --- セッション稼働アニメーション（パルス）--------------------------------
 let sessionDetector = null;
@@ -147,7 +154,9 @@ function createTrayRenderer() {
 }
 
 function requestTrayRender(snap) {
-  if (!trayRenderer || !trayRendererReady) return;
+  if (isQuitting) return;
+  if (!trayRenderer || trayRenderer.isDestroyed() || !trayRendererReady) return;
+  if (trayRenderer.webContents.isDestroyed()) return;
   const items = trayItems(snap);
   if (!items.length) {
     // 監視対象なし or 全滅: 文字だけのフォールバック
@@ -222,6 +231,7 @@ function togglePopup() {
   popup.show();
   popup.focus();
   sendSnapshot();
+  sendUpdateState();
 }
 
 // --- IPC ------------------------------------------------------------------
@@ -231,6 +241,67 @@ function sendSnapshot() {
     popup.webContents.send('snapshot', snap);
     popup.webContents.send('settings', settings);
   }
+}
+
+// --- 自動更新 -------------------------------------------------------------
+function sendUpdateState() {
+  if (popup && !popup.isDestroyed()) {
+    popup.webContents.send('update-state', updateState);
+  }
+}
+
+function setUpdateState(next) {
+  updateState = { ...updateState, ...next };
+  sendUpdateState();
+}
+
+// 最新版を確認する。silent=true なら失敗を idle 扱いにして UI を煩わせない。
+async function checkUpdate(silent = false) {
+  if (updateState.status === 'checking' || updateState.status === 'downloading') return updateState;
+  setUpdateState({ status: 'checking', error: null });
+  try {
+    const info = await updater.checkForUpdate();
+    if (info.available) {
+      setUpdateState({ status: 'available', current: info.current, latest: info.latest });
+    } else {
+      setUpdateState({ status: 'uptodate', current: info.current, latest: info.latest });
+    }
+  } catch (e) {
+    setUpdateState({ status: silent ? 'idle' : 'error', error: String(e.message || e) });
+  }
+  return updateState;
+}
+
+// 更新をダウンロードして適用→再起動。
+async function applyUpdate() {
+  if (updateState.status === 'downloading') return updateState;
+  setUpdateState({ status: 'downloading', stage: 'download', error: null });
+  try {
+    const info = await updater.checkForUpdate();
+    if (!info.available) {
+      setUpdateState({ status: 'uptodate', current: info.current, latest: info.latest });
+      return updateState;
+    }
+    await updater.downloadAndInstall(info, (stage) => setUpdateState({ stage }));
+    // 差し替え完了 → タイマー・ウィンドウを片付けてから再起動。
+    // （片付けないと稼働中タイマーが破棄済みオブジェクトを触ってクラッシュする）
+    setUpdateState({ stage: 'relaunch' });
+    shutdownForRelaunch();
+    updater.relaunchApp();
+  } catch (e) {
+    const msg = String(e.message || e);
+    // 開発実行では自動更新できない旨を明示
+    setUpdateState({ status: 'error', error: msg === 'dev_mode' ? 'dev_mode' : msg });
+  }
+  return updateState;
+}
+
+// 再起動前の後始末。全タイマーを止め、これ以降の描画を抑止する。
+function shutdownForRelaunch() {
+  isQuitting = true;
+  stopPulseLoop();
+  if (usage) usage.stop();
+  if (sessionDetector) sessionDetector.stop();
 }
 
 function applyLaunchAtLogin(enabled) {
@@ -257,13 +328,21 @@ ipcMain.handle('save-settings', (_e, next) => {
   // パルス設定の変更を即反映（OFF→停止 / ON かつ稼働中→開始）
   if (pulseActive()) startPulseLoop();
   else stopPulseLoop();
-  // trayWindow 等の変更を即メニューバーへ反映
-  const snap = lastSnap || (usage && usage.snapshot());
-  if (snap) requestTrayRender(snap);
+  // trayWindow / watchClaude / watchCodex 等の変更を即メニューバーへ反映。
+  // lastSnap には古い enabled が焼き込まれているため、必ず最新スナップショット
+  // を作り直す（watch オフが即座にメニューバーへ反映されないバグの修正）。
+  const snap = usage ? usage.snapshot() : lastSnap;
+  if (snap) {
+    lastSnap = snap;
+    requestTrayRender(snap);
+  }
   return settings;
 });
 ipcMain.on('quit-app', () => app.quit());
 ipcMain.on('report-height', (_e, h) => resizePopup(h));
+ipcMain.handle('get-update-state', () => updateState);
+ipcMain.handle('check-update', () => checkUpdate(false));
+ipcMain.handle('apply-update', () => applyUpdate());
 
 // 隠しレンダラ準備完了 → 初回描画（lastSnap が無ければ現スナップショット）
 ipcMain.on('tray-ready', () => {
@@ -322,6 +401,11 @@ app.whenReady().then(() => {
 
   // ダーク/ライト切替時は再描画（テンプレート画像なので色は自動だが、念のため）
   nativeTheme.on('updated', () => { if (lastSnap) requestTrayRender(lastSnap); });
+
+  // 起動時に最新版を静かに確認（失敗しても黙って idle）。パッケージ版のみ。
+  if (app.isPackaged) {
+    setTimeout(() => { checkUpdate(true); }, 4000);
+  }
 });
 
 app.on('window-all-closed', (e) => {

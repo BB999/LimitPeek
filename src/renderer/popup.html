@@ -57,6 +57,10 @@
     button.icon { flex: 0 0 auto; width: 34px; padding: 7px 0; }
     .updated { font-size: 10px; color: var(--fg-dim); text-align: center; margin-top: 8px; }
     .disabled { opacity: 0.4; }
+    /* 更新あり: ボタンを強調 */
+    button.has-update { background: var(--accent); color: #fff; }
+    button.has-update:hover { background: var(--accent); filter: brightness(1.08); }
+    button:disabled { opacity: 0.5; cursor: default; }
 
     /* --- 設定パネル（常時表示） --- */
     .set-field {
@@ -162,6 +166,13 @@
     </div>
     <div class="set-saved" id="setSaved" data-i18n="saved">保存しました</div>
   </div>
+
+  <div class="divider"></div>
+  <!-- アプリ自動更新 -->
+  <div class="actions">
+    <button id="appUpdate" data-i18n="checkUpdate">更新をチェック</button>
+  </div>
+  <div id="updateNote" class="updated"></div>
 
   <div class="divider"></div>
   <div class="actions">
